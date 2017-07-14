@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Server.Kestrel.Core.Features;
 using Microsoft.Extensions.Primitives;
 
 namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
@@ -20,7 +21,11 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
                                  IHttpUpgradeFeature,
                                  IHttpConnectionFeature,
                                  IHttpRequestLifetimeFeature,
-                                 IHttpRequestIdentifierFeature
+                                 IHttpRequestIdentifierFeature,
+                                 IHttpBodyControlFeature,
+                                 IHttpMaxRequestBodySizeFeature,
+                                 IHttpMinRequestBodyDataRateFeature,
+                                 IHttpMinResponseDataRateFeature
     {
         // NOTE: When feature interfaces are added to or removed from this Frame class implementation,
         // then the list of `implementedFeatures` in the generated code project MUST also be updated.
@@ -160,7 +165,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
 
         bool IHttpResponseFeature.HasStarted => HasResponseStarted;
 
-        bool IHttpUpgradeFeature.IsUpgradableRequest => _upgrade;
+        bool IHttpUpgradeFeature.IsUpgradableRequest => _upgradeAvailable;
 
         bool IFeatureCollection.IsReadOnly => false;
 
@@ -202,6 +207,48 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
             set => TraceIdentifier = value;
         }
 
+        bool IHttpBodyControlFeature.AllowSynchronousIO
+        {
+            get => AllowSynchronousIO;
+            set => AllowSynchronousIO = value;
+        }
+
+        bool IHttpMaxRequestBodySizeFeature.IsReadOnly => HasStartedConsumingRequestBody || _wasUpgraded;
+
+        long? IHttpMaxRequestBodySizeFeature.MaxRequestBodySize
+        {
+            get => MaxRequestBodySize;
+            set
+            {
+                if (HasStartedConsumingRequestBody)
+                {
+                    throw new InvalidOperationException(CoreStrings.MaxRequestBodySizeCannotBeModifiedAfterRead);
+                }
+                if (_wasUpgraded)
+                {
+                    throw new InvalidOperationException(CoreStrings.MaxRequestBodySizeCannotBeModifiedForUpgradedRequests);
+                }
+                if (value < 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(value), CoreStrings.NonNegativeNumberOrNullRequired);
+                }
+
+                MaxRequestBodySize = value;
+            }
+        }
+
+        MinDataRate IHttpMinRequestBodyDataRateFeature.MinDataRate
+        {
+            get => MinRequestBodyDataRate;
+            set => MinRequestBodyDataRate = value;
+        }
+
+        MinDataRate IHttpMinResponseDataRateFeature.MinDataRate
+        {
+            get => MinResponseDataRate;
+            set => MinResponseDataRate = value;
+        }
+
         object IFeatureCollection.this[Type key]
         {
             get => FastFeatureGet(key);
@@ -230,6 +277,25 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
 
         async Task<Stream> IHttpUpgradeFeature.UpgradeAsync()
         {
+            if (!((IHttpUpgradeFeature)this).IsUpgradableRequest)
+            {
+                throw new InvalidOperationException(CoreStrings.CannotUpgradeNonUpgradableRequest);
+            }
+
+            if (_wasUpgraded)
+            {
+                throw new InvalidOperationException(CoreStrings.UpgradeCannotBeCalledMultipleTimes);
+            }
+
+            if (!ServiceContext.ConnectionManager.UpgradedConnectionCount.TryLockOne())
+            {
+                throw new InvalidOperationException(CoreStrings.UpgradedConnectionLimitReached);
+            }
+
+            _wasUpgraded = true;
+
+            ServiceContext.ConnectionManager.NormalConnectionCount.ReleaseOne();
+
             StatusCode = StatusCodes.Status101SwitchingProtocols;
             ReasonPhrase = "Switching Protocols";
             ResponseHeaders["Connection"] = "Upgrade";

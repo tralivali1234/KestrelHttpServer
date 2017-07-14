@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Security;
@@ -16,15 +17,22 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
+using Microsoft.AspNetCore.Server.Kestrel.Https.Internal;
 using Microsoft.AspNetCore.Testing;
-using Microsoft.Extensions.Internal;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
 {
     public class HttpsConnectionAdapterTests
     {
         private static X509Certificate2 _x509Certificate2 = new X509Certificate2(TestResources.TestCertificatePath, "testPassword");
+        private readonly ITestOutputHelper _output;
+
+        public HttpsConnectionAdapterTests(ITestOutputHelper output)
+        {
+            _output = output;
+        }
 
         // https://github.com/aspnet/KestrelHttpServer/issues/240
         // This test currently fails on mono because of an issue with SslStream.
@@ -126,7 +134,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                 }
             };
 
-            using (var server = new TestServer(context => TaskCache.CompletedTask, serviceContext, listenOptions))
+            using (var server = new TestServer(context => Task.CompletedTask, serviceContext, listenOptions))
             {
                 using (var client = new TcpClient())
                 {
@@ -256,7 +264,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                 }
             };
 
-            using (var server = new TestServer(context => TaskCache.CompletedTask, serviceContext, listenOptions))
+            using (var server = new TestServer(context => Task.CompletedTask, serviceContext, listenOptions))
             {
                 using (var client = new TcpClient())
                 {
@@ -287,7 +295,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                 }
             };
 
-            using (var server = new TestServer(context => TaskCache.CompletedTask, serviceContext, listenOptions))
+            using (var server = new TestServer(context => Task.CompletedTask, serviceContext, listenOptions))
             {
                 using (var client = new TcpClient())
                 {
@@ -316,7 +324,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                 }
             };
 
-            using (var server = new TestServer(context => TaskCache.CompletedTask, serviceContext, listenOptions))
+            using (var server = new TestServer(context => Task.CompletedTask, serviceContext, listenOptions))
             {
                 using (var client = new TcpClient())
                 {
@@ -366,6 +374,60 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                     await AssertConnectionResult(stream, true);
                 }
             }
+        }
+
+        [Theory]
+        [InlineData("no_extensions.pfx")]
+        public void AcceptsCertificateWithoutExtensions(string testCertName)
+        {
+            var certPath = TestResources.GetCertPath(testCertName);
+            _output.WriteLine("Loading " + certPath);
+            var cert = new X509Certificate2(certPath, "testPassword");
+            Assert.Empty(cert.Extensions.OfType<X509EnhancedKeyUsageExtension>());
+
+            new HttpsConnectionAdapter(new HttpsConnectionAdapterOptions
+            {
+                ServerCertificate = cert,
+            });
+        }
+
+        [Theory]
+        [InlineData("eku.server.pfx")]
+        [InlineData("eku.multiple_usages.pfx")]
+        public void ValidatesEnhancedKeyUsageOnCertificate(string testCertName)
+        {
+            var certPath = TestResources.GetCertPath(testCertName);
+            _output.WriteLine("Loading " + certPath);
+            var cert = new X509Certificate2(certPath, "testPassword");
+            Assert.NotEmpty(cert.Extensions);
+            var eku = Assert.Single(cert.Extensions.OfType<X509EnhancedKeyUsageExtension>());
+            Assert.NotEmpty(eku.EnhancedKeyUsages);
+
+            new HttpsConnectionAdapter(new HttpsConnectionAdapterOptions
+            {
+                ServerCertificate = cert,
+            });
+        }
+
+        [Theory]
+        [InlineData("eku.code_signing.pfx")]
+        [InlineData("eku.client.pfx")]
+        public void ThrowsForCertificatesMissingServerEku(string testCertName)
+        {
+            var certPath = TestResources.GetCertPath(testCertName);
+            _output.WriteLine("Loading " + certPath);
+            var cert = new X509Certificate2(certPath, "testPassword");
+            Assert.NotEmpty(cert.Extensions);
+            var eku = Assert.Single(cert.Extensions.OfType<X509EnhancedKeyUsageExtension>());
+            Assert.NotEmpty(eku.EnhancedKeyUsages);
+
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                new HttpsConnectionAdapter(new HttpsConnectionAdapterOptions
+                {
+                    ServerCertificate = cert,
+                }));
+
+            Assert.Equal(HttpsStrings.FormatInvalidServerCertificateEku(cert.Thumbprint), ex.Message);
         }
 
         private static async Task App(HttpContext httpContext)

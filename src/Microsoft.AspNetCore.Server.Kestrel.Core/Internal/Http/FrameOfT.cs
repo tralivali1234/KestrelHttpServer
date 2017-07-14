@@ -7,7 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure;
-using Microsoft.AspNetCore.Server.Kestrel.Transport.Abstractions;
+using Microsoft.AspNetCore.Server.Kestrel.Transport.Abstractions.Internal;
 using Microsoft.Extensions.Logging;
 
 namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
@@ -89,7 +89,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
 
                         var messageBody = MessageBody.For(_httpVersion, FrameRequestHeaders, this);
                         _keepAlive = messageBody.RequestKeepAlive;
-                        _upgrade = messageBody.RequestUpgrade;
+                        _upgradeAvailable = messageBody.RequestUpgrade;
 
                         InitializeStreams(messageBody);
 
@@ -100,7 +100,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
                             {
                                 KestrelEventSource.Log.RequestStart(this);
 
-                                await _application.ProcessRequestAsync(context).ConfigureAwait(false);
+                                await _application.ProcessRequestAsync(context);
 
                                 if (Volatile.Read(ref _requestAborted) == 0)
                                 {
@@ -140,8 +140,6 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
                             // If _requestAbort is set, the connection has already been closed.
                             if (Volatile.Read(ref _requestAborted) == 0)
                             {
-                                ResumeStreams();
-
                                 if (HasResponseStarted)
                                 {
                                     // If the response has already started, call ProduceEnd() before
@@ -156,10 +154,13 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
                                     await ProduceEnd();
                                 }
 
-                                if (_keepAlive)
+                                // ForZeroContentLength does not complete the reader nor the writer
+                                if (!messageBody.IsEmpty && _keepAlive)
                                 {
                                     // Finish reading the request body in case the app did not.
-                                    await messageBody.Consume();
+                                    TimeoutControl.SetTimeout(Constants.RequestBodyDrainTimeout.Ticks, TimeoutAction.SendTimeoutResponse);
+                                    await messageBody.ConsumeAsync();
+                                    TimeoutControl.CancelTimeout();
                                 }
 
                                 if (!HasResponseStarted)
@@ -188,6 +189,17 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
                             // StopStreams should be called before the end of the "if (!_requestProcessingStopping)" block
                             // to ensure InitializeStreams has been called.
                             StopStreams();
+
+                            if (HasStartedConsumingRequestBody)
+                            {
+                                RequestBodyPipe.Reader.Complete();
+
+                                // Wait for MessageBody.PumpAsync() to call RequestBodyPipe.Writer.Complete().
+                                await messageBody.StopAsync();
+
+                                // At this point both the request body pipe reader and writer should be completed.
+                                RequestBodyPipe.Reset();
+                            }
                         }
                     }
 
@@ -225,6 +237,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
                 try
                 {
                     Input.Complete();
+
                     // If _requestAborted is set, the connection has already been closed.
                     if (Volatile.Read(ref _requestAborted) == 0)
                     {

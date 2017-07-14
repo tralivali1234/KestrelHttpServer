@@ -6,16 +6,19 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
 {
     internal class FrameResponseStream : WriteOnlyStream
     {
-        private IFrameControl _frameControl;
+        private readonly IHttpBodyControlFeature _bodyControl;
+        private readonly IFrameControl _frameControl;
         private FrameStreamState _state;
 
-        public FrameResponseStream(IFrameControl frameControl)
+        public FrameResponseStream(IHttpBodyControlFeature bodyControl, IFrameControl frameControl)
         {
+            _bodyControl = bodyControl;
             _frameControl = frameControl;
             _state = FrameStreamState.Closed;
         }
@@ -33,9 +36,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
 
         public override void Flush()
         {
-            ValidateState(default(CancellationToken));
-
-            _frameControl.Flush();
+            FlushAsync(default(CancellationToken)).GetAwaiter().GetResult();
         }
 
         public override Task FlushAsync(CancellationToken cancellationToken)
@@ -60,9 +61,12 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
 
         public override void Write(byte[] buffer, int offset, int count)
         {
-            ValidateState(default(CancellationToken));
+            if (!_bodyControl.AllowSynchronousIO)
+            {
+                throw new InvalidOperationException(CoreStrings.SynchronousWritesDisallowed);
+            }
 
-            _frameControl.Write(new ArraySegment<byte>(buffer, offset, count));
+            WriteAsync(buffer, offset, count, default(CancellationToken)).GetAwaiter().GetResult();
         }
 
         public override IAsyncResult BeginWrite(byte[] buffer, int offset, int count, AsyncCallback callback, object state)
@@ -125,14 +129,6 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
         public void PauseAcceptingWrites()
         {
             _state = FrameStreamState.Closed;
-        }
-
-        public void ResumeAcceptingWrites()
-        {
-            if (_state == FrameStreamState.Closed)
-            {
-                _state = FrameStreamState.Open;
-            }
         }
 
         public void StopAcceptingWrites()

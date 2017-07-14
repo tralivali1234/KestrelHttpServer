@@ -6,20 +6,18 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Server.Kestrel.Core.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure;
 using Microsoft.AspNetCore.Server.Kestrel.Internal.System.IO.Pipelines;
-using Microsoft.AspNetCore.Server.Kestrel.Transport.Abstractions;
 using Microsoft.AspNetCore.Testing;
-using Microsoft.Extensions.Internal;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 using Moq;
@@ -62,7 +60,10 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
             _frameContext = new FrameContext
             {
                 ServiceContext = _serviceContext,
-                ConnectionInformation = Mock.Of<IConnectionInformation>(),
+                ConnectionInformation = new MockConnectionInformation
+                {
+                    PipeFactory = _pipelineFactory
+                },
                 TimeoutControl = _timeoutControl.Object,
                 Input = _input.Reader,
                 Output = output
@@ -140,6 +141,26 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
         }
 
         [Fact]
+        public void ResetResetsMinRequestBodyDataRate()
+        {
+            _frame.MinRequestBodyDataRate = new MinDataRate(bytesPerSecond: 1, gracePeriod: TimeSpan.MaxValue);
+
+            _frame.Reset();
+
+            Assert.Same(_serviceContext.ServerOptions.Limits.MinRequestBodyDataRate, _frame.MinRequestBodyDataRate);
+        }
+
+        [Fact]
+        public void ResetResetsMinResponseDataRate()
+        {
+            _frame.MinResponseDataRate = new MinDataRate(bytesPerSecond: 1, gracePeriod: TimeSpan.MaxValue);
+
+            _frame.Reset();
+
+            Assert.Same(_serviceContext.ServerOptions.Limits.MinResponseDataRate, _frame.MinResponseDataRate);
+        }
+
+        [Fact]
         public void TraceIdentifierCountsRequestsPerFrame()
         {
             var connectionId = _frameContext.ConnectionId;
@@ -211,10 +232,10 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
         }
 
         [Fact]
-        public void ThrowsWhenStatusCodeIsSetAfterResponseStarted()
+        public async Task ThrowsWhenStatusCodeIsSetAfterResponseStarted()
         {
             // Act
-            _frame.Write(new ArraySegment<byte>(new byte[1]));
+            await _frame.WriteAsync(new ArraySegment<byte>(new byte[1]));
 
             // Assert
             Assert.True(_frame.HasResponseStarted);
@@ -222,10 +243,10 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
         }
 
         [Fact]
-        public void ThrowsWhenReasonPhraseIsSetAfterResponseStarted()
+        public async Task ThrowsWhenReasonPhraseIsSetAfterResponseStarted()
         {
             // Act
-            _frame.Write(new ArraySegment<byte>(new byte[1]));
+            await _frame.WriteAsync(new ArraySegment<byte>(new byte[1]));
 
             // Assert
             Assert.True(_frame.HasResponseStarted);
@@ -233,13 +254,31 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
         }
 
         [Fact]
-        public void ThrowsWhenOnStartingIsSetAfterResponseStarted()
+        public async Task ThrowsWhenOnStartingIsSetAfterResponseStarted()
         {
-            _frame.Write(new ArraySegment<byte>(new byte[1]));
+            await _frame.WriteAsync(new ArraySegment<byte>(new byte[1]));
 
             // Act/Assert
             Assert.True(_frame.HasResponseStarted);
-            Assert.Throws<InvalidOperationException>(() => ((IHttpResponseFeature)_frame).OnStarting(_ => TaskCache.CompletedTask, null));
+            Assert.Throws<InvalidOperationException>(() => ((IHttpResponseFeature)_frame).OnStarting(_ => Task.CompletedTask, null));
+        }
+
+        [Theory]
+        [MemberData(nameof(MinDataRateData))]
+        public void ConfiguringIHttpMinRequestBodyDataRateFeatureSetsMinRequestBodyDataRate(MinDataRate minDataRate)
+        {
+            ((IFeatureCollection)_frame).Get<IHttpMinRequestBodyDataRateFeature>().MinDataRate = minDataRate;
+
+            Assert.Same(minDataRate, _frame.MinRequestBodyDataRate);
+        }
+
+        [Theory]
+        [MemberData(nameof(MinDataRateData))]
+        public void ConfiguringIHttpMinResponseDataRateFeatureSetsMinResponseDataRate(MinDataRate minDataRate)
+        {
+            ((IFeatureCollection)_frame).Get<IHttpMinResponseDataRateFeature>().MinDataRate = minDataRate;
+
+            Assert.Same(minDataRate, _frame.MinResponseDataRate);
         }
 
         [Fact]
@@ -472,13 +511,13 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
         }
 
         [Fact]
-        public void WriteThrowsForNonBodyResponse()
+        public async Task WriteThrowsForNonBodyResponse()
         {
             // Arrange
             ((IHttpResponseFeature)_frame).StatusCode = StatusCodes.Status304NotModified;
 
             // Act/Assert
-            Assert.Throws<InvalidOperationException>(() => _frame.Write(new ArraySegment<byte>(new byte[1])));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => _frame.WriteAsync(new ArraySegment<byte>(new byte[1])));
         }
 
         [Fact]
@@ -493,14 +532,14 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
         }
 
         [Fact]
-        public void WriteDoesNotThrowForHeadResponse()
+        public async Task WriteDoesNotThrowForHeadResponse()
         {
             // Arrange
             _frame.HttpVersion = "HTTP/1.1";
             ((IHttpRequestFeature)_frame).Method = "HEAD";
 
             // Act/Assert
-            _frame.Write(new ArraySegment<byte>(new byte[1]));
+            await _frame.WriteAsync(new ArraySegment<byte>(new byte[1]));
         }
 
         [Fact]
@@ -515,7 +554,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
         }
 
         [Fact]
-        public void ManuallySettingTransferEncodingThrowsForHeadResponse()
+        public async Task ManuallySettingTransferEncodingThrowsForHeadResponse()
         {
             // Arrange
             _frame.HttpVersion = "HTTP/1.1";
@@ -525,11 +564,11 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
             _frame.ResponseHeaders.Add("Transfer-Encoding", "chunked");
 
             // Assert
-            Assert.Throws<InvalidOperationException>(() => _frame.Flush());
+            await Assert.ThrowsAsync<InvalidOperationException>(() => _frame.FlushAsync());
         }
 
         [Fact]
-        public void ManuallySettingTransferEncodingThrowsForNoBodyResponse()
+        public async Task ManuallySettingTransferEncodingThrowsForNoBodyResponse()
         {
             // Arrange
             _frame.HttpVersion = "HTTP/1.1";
@@ -539,7 +578,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
             _frame.ResponseHeaders.Add("Transfer-Encoding", "chunked");
 
             // Assert
-            Assert.Throws<InvalidOperationException>(() => _frame.Flush());
+            await Assert.ThrowsAsync<InvalidOperationException>(() => _frame.FlushAsync());
         }
 
         [Fact]
@@ -558,7 +597,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
         }
 
         [Fact]
-        public void RequestAbortedTokenIsResetBeforeLastWriteWithContentLength()
+        public async Task RequestAbortedTokenIsResetBeforeLastWriteWithContentLength()
         {
             _frame.ResponseHeaders["Content-Length"] = "12";
 
@@ -567,11 +606,11 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
 
             foreach (var ch in "hello, worl")
             {
-                _frame.Write(new ArraySegment<byte>(new[] { (byte)ch }));
+                await _frame.WriteAsync(new ArraySegment<byte>(new[] { (byte)ch }));
                 Assert.Same(original, _frame.RequestAborted.WaitHandle);
             }
 
-            _frame.Write(new ArraySegment<byte>(new[] { (byte)'d' }));
+            await _frame.WriteAsync(new ArraySegment<byte>(new[] { (byte)'d' }));
             Assert.NotSame(original, _frame.RequestAborted.WaitHandle);
         }
 
@@ -730,6 +769,27 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
             await requestProcessingTask.TimeoutAfter(TimeSpan.FromSeconds(10));
         }
 
+        [Fact]
+        public void ThrowsWhenMaxRequestBodySizeIsSetAfterReadingFromRequestBody()
+        {
+            // Act
+            // This would normally be set by the MessageBody during the first read.
+            _frame.HasStartedConsumingRequestBody = true;
+
+            // Assert
+            Assert.True(((IHttpMaxRequestBodySizeFeature)_frame).IsReadOnly);
+            var ex = Assert.Throws<InvalidOperationException>(() => ((IHttpMaxRequestBodySizeFeature)_frame).MaxRequestBodySize = 1);
+            Assert.Equal(CoreStrings.MaxRequestBodySizeCannotBeModifiedAfterRead, ex.Message);
+        }
+
+        [Fact]
+        public void ThrowsWhenMaxRequestBodySizeIsSetToANegativeValue()
+        {
+            // Assert
+            var ex = Assert.Throws<ArgumentOutOfRangeException>(() => ((IHttpMaxRequestBodySizeFeature)_frame).MaxRequestBodySize = -1);
+            Assert.StartsWith(CoreStrings.NonNegativeNumberOrNullRequired, ex.Message);
+        }
+
         private static async Task WaitForCondition(TimeSpan timeout, Func<bool> condition)
         {
             const int MaxWaitLoop = 150;
@@ -821,6 +881,27 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
                 return data;
             }
         }
+
+        public static TheoryData<TimeSpan> RequestBodyTimeoutDataValid => new TheoryData<TimeSpan>
+        {
+            TimeSpan.FromTicks(1),
+            TimeSpan.MaxValue,
+            Timeout.InfiniteTimeSpan,
+            TimeSpan.FromMilliseconds(-1) // Same as Timeout.InfiniteTimeSpan
+        };
+
+        public static TheoryData<TimeSpan> RequestBodyTimeoutDataInvalid => new TheoryData<TimeSpan>
+        {
+            TimeSpan.MinValue,
+            TimeSpan.FromTicks(-1),
+            TimeSpan.Zero
+        };
+
+        public static TheoryData<MinDataRate> MinDataRateData => new TheoryData<MinDataRate>
+        {
+            null,
+            new MinDataRate(bytesPerSecond: 1, gracePeriod: TimeSpan.MaxValue)
+        };
 
         private class RequestHeadersWrapper : IHeaderDictionary
         {

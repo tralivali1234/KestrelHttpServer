@@ -5,8 +5,19 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure
 {
     public interface ITimeoutControl
     {
+        bool TimedOut { get; }
+
         void SetTimeout(long ticks, TimeoutAction timeoutAction);
         void ResetTimeout(long ticks, TimeoutAction timeoutAction);
         void CancelTimeout();
+
+        void StartTimingReads();
+        void PauseTimingReads();
+        void ResumeTimingReads();
+        void StopTimingReads();
+        void BytesRead(int count);
+
+        void StartTimingWrite(int size);
+        void StopTimingWrite();
     }
 }

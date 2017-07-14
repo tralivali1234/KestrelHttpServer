@@ -17,10 +17,12 @@ namespace Microsoft.AspNetCore.Testing
     /// </summary>
     public class TestConnection : IDisposable
     {
-        private Socket _socket;
-        private NetworkStream _stream;
-        private StreamReader _reader;
         private static readonly TimeSpan Timeout = TimeSpan.FromMinutes(1);
+
+        private readonly bool _ownsSocket;
+        private readonly Socket _socket;
+        private readonly NetworkStream _stream;
+        private readonly StreamReader _reader;
 
         public TestConnection(int port)
             : this(port, AddressFamily.InterNetwork)
@@ -28,24 +30,61 @@ namespace Microsoft.AspNetCore.Testing
         }
 
         public TestConnection(int port, AddressFamily addressFamily)
+            : this(CreateConnectedLoopbackSocket(port, addressFamily), ownsSocket: true)
         {
-            Create(port, addressFamily);
         }
 
-        public StreamReader Reader => _reader;
-
-        public void Create(int port, AddressFamily addressFamily)
+        public TestConnection(Socket socket)
+            : this(socket, ownsSocket: false)
         {
-            _socket = CreateConnectedLoopbackSocket(port, addressFamily);
+        }
 
-            _stream = new NetworkStream(_socket, false);
+        private TestConnection(Socket socket, bool ownsSocket)
+        {
+            _ownsSocket = ownsSocket;
+            _socket = socket;
+            _stream = new NetworkStream(_socket, ownsSocket: false);
             _reader = new StreamReader(_stream, Encoding.ASCII);
         }
+
+        public Socket Socket => _socket;
+
+        public StreamReader Reader => _reader;
 
         public void Dispose()
         {
             _stream.Dispose();
-            _socket.Dispose();
+
+            if (_ownsSocket)
+            {
+                _socket.Dispose();
+            }
+        }
+
+        public Task SendEmptyGet()
+        {
+            return Send("GET / HTTP/1.1",
+                "Host:",
+                "",
+                "");
+        }
+
+        public Task SendEmptyGetWithUpgradeAndKeepAlive()
+            => SendEmptyGetWithConnection("Upgrade, keep-alive");
+
+        public Task SendEmptyGetWithUpgrade()
+            => SendEmptyGetWithConnection("Upgrade");
+
+        public Task SendEmptyGetAsKeepAlive()
+            => SendEmptyGetWithConnection("keep-alive");
+
+        private Task SendEmptyGetWithConnection(string connection)
+        {
+            return Send("GET / HTTP/1.1",
+                "Host:",
+                "Connection: " + connection,
+                "",
+                "");
         }
 
         public async Task SendAll(params string[] lines)
@@ -78,20 +117,31 @@ namespace Microsoft.AspNetCore.Testing
             var expected = string.Join("\r\n", lines);
             var actual = new char[expected.Length];
             var offset = 0;
-            while (offset < expected.Length)
+
+            try
             {
-                var data = new byte[expected.Length];
-                var task = _reader.ReadAsync(actual, offset, actual.Length - offset);
-                if (!Debugger.IsAttached)
+                while (offset < expected.Length)
                 {
-                    task = task.TimeoutAfter(Timeout);
+                    var data = new byte[expected.Length];
+                    var task = _reader.ReadAsync(actual, offset, actual.Length - offset);
+                    if (!Debugger.IsAttached)
+                    {
+                        task = task.TimeoutAfter(Timeout);
+                    }
+                    var count = await task.ConfigureAwait(false);
+                    if (count == 0)
+                    {
+                        break;
+                    }
+                    offset += count;
                 }
-                var count = await task.ConfigureAwait(false);
-                if (count == 0)
-                {
-                    break;
-                }
-                offset += count;
+            }
+            catch (TimeoutException ex) when (offset != 0)
+            {
+                throw new TimeoutException($"Did not receive a complete response within {Timeout}.{Environment.NewLine}{Environment.NewLine}" +
+                    $"Expected:{Environment.NewLine}{expected}{Environment.NewLine}{Environment.NewLine}" +
+                    $"Actual:{Environment.NewLine}{new string(actual, 0, offset)}{Environment.NewLine}",
+                    ex);
             }
 
             Assert.Equal(expected, new string(actual, 0, offset));

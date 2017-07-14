@@ -7,9 +7,6 @@ using Microsoft.Extensions.Logging;
 
 namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal
 {
-    /// <summary>
-    /// Summary description for KestrelTrace
-    /// </summary>
     public class KestrelTrace : IKestrelTrace
     {
         private static readonly Action<ILogger, string, Exception> _connectionStart =
@@ -54,6 +51,21 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal
         private static readonly Action<ILogger, string, Exception> _applicationNeverCompleted =
             LoggerMessage.Define<string>(LogLevel.Critical, 23, @"Connection id ""{ConnectionId}"" application never completed");
 
+        private static readonly Action<ILogger, string, Exception> _connectionRejected =
+            LoggerMessage.Define<string>(LogLevel.Warning, 24, @"Connection id ""{ConnectionId}"" rejected because the maximum number of concurrent connections has been reached.");
+
+        private static readonly Action<ILogger, string, string, Exception> _requestBodyStart =
+            LoggerMessage.Define<string, string>(LogLevel.Debug, 25, @"Connection id ""{ConnectionId}"", Request id ""{TraceIdentifier}"": started reading request body.");
+
+        private static readonly Action<ILogger, string, string, Exception> _requestBodyDone =
+            LoggerMessage.Define<string, string>(LogLevel.Debug, 26, @"Connection id ""{ConnectionId}"", Request id ""{TraceIdentifier}"": done reading request body.");
+
+        private static readonly Action<ILogger, string, string, double, Exception> _requestBodyMinimumDataRateNotSatisfied =
+            LoggerMessage.Define<string, string, double>(LogLevel.Information, 27, @"Connection id ""{ConnectionId}"", Request id ""{TraceIdentifier}"": the request timed out because it was not sent by the client at a minimum of {Rate} bytes/second.");
+
+        private static readonly Action<ILogger, string, string, Exception> _responseMinimumDataRateNotSatisfied =
+            LoggerMessage.Define<string, string>(LogLevel.Information, 28, @"Connection id ""{ConnectionId}"", Request id ""{TraceIdentifier}"": the connection was closed becuase the response was not read by the client at the specified minimum data rate.");
+
         protected readonly ILogger _logger;
 
         public KestrelTrace(ILogger logger)
@@ -84,6 +96,11 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal
         public virtual void ConnectionKeepAlive(string connectionId)
         {
             _connectionKeepAlive(_logger, connectionId, null);
+        }
+
+        public void ConnectionRejected(string connectionId)
+        {
+            _connectionRejected(_logger, connectionId, null);
         }
 
         public virtual void ConnectionDisconnect(string connectionId)
@@ -129,6 +146,26 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal
         public virtual void ApplicationNeverCompleted(string connectionId)
         {
             _applicationNeverCompleted(_logger, connectionId, null);
+        }
+
+        public virtual void RequestBodyStart(string connectionId, string traceIdentifier)
+        {
+            _requestBodyStart(_logger, connectionId, traceIdentifier, null);
+        }
+
+        public virtual void RequestBodyDone(string connectionId, string traceIdentifier)
+        {
+            _requestBodyDone(_logger, connectionId, traceIdentifier, null);
+        }
+
+        public void RequestBodyMininumDataRateNotSatisfied(string connectionId, string traceIdentifier, double rate)
+        {
+            _requestBodyMinimumDataRateNotSatisfied(_logger, connectionId, traceIdentifier, rate, null);
+        }
+
+        public void ResponseMininumDataRateNotSatisfied(string connectionId, string traceIdentifier)
+        {
+            _responseMinimumDataRateNotSatisfied(_logger, connectionId, traceIdentifier, null);
         }
 
         public virtual void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)

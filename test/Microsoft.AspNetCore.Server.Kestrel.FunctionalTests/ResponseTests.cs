@@ -7,7 +7,10 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -19,12 +22,15 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure;
+using Microsoft.AspNetCore.Server.Kestrel.Https;
+using Microsoft.AspNetCore.Server.Kestrel.Https.Internal;
 using Microsoft.AspNetCore.Testing;
-using Microsoft.Extensions.Internal;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 using Moq;
 using Xunit;
+using Xunit.Sdk;
 
 namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
 {
@@ -181,7 +187,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                     {
                         await context.Response.WriteAsync("hello, world");
                         await context.Response.Body.FlushAsync();
-                        ex = Assert.Throws<InvalidOperationException>(() => context.Response.OnStarting(_ => TaskCache.CompletedTask, null));
+                        ex = Assert.Throws<InvalidOperationException>(() => context.Response.OnStarting(_ => Task.CompletedTask, null));
                     });
                 });
 
@@ -219,7 +225,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                 context =>
                 {
                     context.Abort();
-                    return TaskCache.CompletedTask;
+                    return Task.CompletedTask;
                 },
                 expectedClientStatusCode: null,
                 expectedServerStatusCode: 0);
@@ -244,7 +250,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
             return ResponseStatusCodeSetBeforeHttpContextDispose(
                 context =>
                 {
-                    return TaskCache.CompletedTask;
+                    return Task.CompletedTask;
                 },
                 expectedClientStatusCode: null,
                 expectedServerStatusCode: HttpStatusCode.BadRequest,
@@ -300,7 +306,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                     disposedTcs.TrySetResult(c.Response.StatusCode);
                 });
 
-            using (var server = new TestServer(handler, new TestServiceContext(), mockHttpContextFactory.Object))
+            using (var server = new TestServer(handler, new TestServiceContext(), new ListenOptions(new IPEndPoint(IPAddress.Loopback, 0)),
+                                               services => services.AddSingleton(mockHttpContextFactory.Object)))
             {
                 if (!sendMalformedRequest)
                 {
@@ -419,7 +426,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
             using (var server = new TestServer(httpContext =>
             {
                 httpContext.Response.StatusCode = statusCode;
-                return TaskCache.CompletedTask;
+                return Task.CompletedTask;
             }))
             {
                 using (var connection = server.CreateConnection())
@@ -443,7 +450,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
         {
             using (var server = new TestServer(httpContext =>
             {
-                return TaskCache.CompletedTask;
+                return Task.CompletedTask;
             }))
             {
                 using (var connection = server.CreateConnection())
@@ -507,14 +514,18 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
         public async Task ThrowsAndClosesConnectionWhenAppWritesMoreThanContentLengthWrite()
         {
             var testLogger = new TestApplicationErrorLogger();
-            var serviceContext = new TestServiceContext { Log = new TestKestrelTrace(testLogger) };
+            var serviceContext = new TestServiceContext
+            {
+                Log = new TestKestrelTrace(testLogger),
+                ServerOptions = { AllowSynchronousIO = true }
+            };
 
             using (var server = new TestServer(httpContext =>
             {
                 httpContext.Response.ContentLength = 11;
                 httpContext.Response.Body.Write(Encoding.ASCII.GetBytes("hello,"), 0, 6);
                 httpContext.Response.Body.Write(Encoding.ASCII.GetBytes(" world"), 0, 6);
-                return TaskCache.CompletedTask;
+                return Task.CompletedTask;
             }, serviceContext))
             {
                 using (var connection = server.CreateConnection())
@@ -534,7 +545,6 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                     await connection.WaitForConnectionClose().TimeoutAfter(TimeSpan.FromSeconds(30));
                 }
             }
-
 
             var logMessage = Assert.Single(testLogger.Messages, message => message.LogLevel == LogLevel.Error);
 
@@ -583,14 +593,18 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
         public async Task InternalServerErrorAndConnectionClosedOnWriteWithMoreThanContentLengthAndResponseNotStarted()
         {
             var testLogger = new TestApplicationErrorLogger();
-            var serviceContext = new TestServiceContext { Log = new TestKestrelTrace(testLogger) };
+            var serviceContext = new TestServiceContext
+            {
+                Log = new TestKestrelTrace(testLogger),
+                ServerOptions = { AllowSynchronousIO = true }
+            };
 
             using (var server = new TestServer(httpContext =>
             {
                 var response = Encoding.ASCII.GetBytes("hello, world");
                 httpContext.Response.ContentLength = 5;
                 httpContext.Response.Body.Write(response, 0, response.Length);
-                return TaskCache.CompletedTask;
+                return Task.CompletedTask;
             }, serviceContext))
             {
                 using (var connection = server.CreateConnection())
@@ -762,7 +776,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
             using (var server = new TestServer(httpContext =>
             {
                 httpContext.Response.ContentLength = 5;
-                return TaskCache.CompletedTask;
+                return Task.CompletedTask;
             }, serviceContext))
             {
                 using (var connection = server.CreateConnection())
@@ -910,7 +924,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
             using (var server = new TestServer(httpContext =>
             {
                 httpContext.Response.ContentLength = 42;
-                return TaskCache.CompletedTask;
+                return Task.CompletedTask;
             }))
             {
                 using (var connection = server.CreateConnection())
@@ -965,14 +979,15 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
         public async Task HeadResponseBodyNotWrittenWithSyncWrite()
         {
             var flushed = new SemaphoreSlim(0, 1);
+            var serviceContext = new TestServiceContext { ServerOptions = { AllowSynchronousIO = true } };
 
             using (var server = new TestServer(httpContext =>
             {
                 httpContext.Response.ContentLength = 12;
                 httpContext.Response.Body.Write(Encoding.ASCII.GetBytes("hello, world"), 0, 12);
                 flushed.Wait();
-                return TaskCache.CompletedTask;
-            }))
+                return Task.CompletedTask;
+            }, serviceContext))
             {
                 using (var connection = server.CreateConnection())
                 {
@@ -1113,8 +1128,6 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
         [Theory]
         [InlineData("gzip")]
         [InlineData("chunked, gzip")]
-        [InlineData("gzip")]
-        [InlineData("chunked, gzip")]
         public async Task ConnectionClosedWhenChunkedIsNotFinalTransferCoding(string responseTransferEncoding)
         {
             using (var server = new TestServer(async httpContext =>
@@ -1158,8 +1171,6 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
         }
 
         [Theory]
-        [InlineData("gzip")]
-        [InlineData("chunked, gzip")]
         [InlineData("gzip")]
         [InlineData("chunked, gzip")]
         public async Task ConnectionClosedWhenChunkedIsNotFinalTransferCodingEvenIfConnectionKeepAliveSetInResponse(string responseTransferEncoding)
@@ -1251,13 +1262,15 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
         [Fact]
         public async Task FirstWriteVerifiedAfterOnStarting()
         {
+            var serviceContext = new TestServiceContext { ServerOptions = { AllowSynchronousIO = true } };
+
             using (var server = new TestServer(httpContext =>
             {
                 httpContext.Response.OnStarting(() =>
                 {
                     // Change response to chunked
                     httpContext.Response.ContentLength = null;
-                    return TaskCache.CompletedTask;
+                    return Task.CompletedTask;
                 });
 
                 var response = Encoding.ASCII.GetBytes("hello, world");
@@ -1265,8 +1278,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
 
                 // If OnStarting is not run before verifying writes, an error response will be sent.
                 httpContext.Response.Body.Write(response, 0, response.Length);
-                return TaskCache.CompletedTask;
-            }))
+                return Task.CompletedTask;
+            }, serviceContext))
             {
                 using (var connection = server.CreateConnection())
                 {
@@ -1292,13 +1305,15 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
         [Fact]
         public async Task SubsequentWriteVerifiedAfterOnStarting()
         {
+            var serviceContext = new TestServiceContext { ServerOptions = { AllowSynchronousIO = true } };
+
             using (var server = new TestServer(httpContext =>
             {
                 httpContext.Response.OnStarting(() =>
                 {
                     // Change response to chunked
                     httpContext.Response.ContentLength = null;
-                    return TaskCache.CompletedTask;
+                    return Task.CompletedTask;
                 });
 
                 var response = Encoding.ASCII.GetBytes("hello, world");
@@ -1307,8 +1322,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                 // If OnStarting is not run before verifying writes, an error response will be sent.
                 httpContext.Response.Body.Write(response, 0, response.Length / 2);
                 httpContext.Response.Body.Write(response, response.Length / 2, response.Length - response.Length / 2);
-                return TaskCache.CompletedTask;
-            }))
+                return Task.CompletedTask;
+            }, serviceContext))
             {
                 using (var connection = server.CreateConnection())
                 {
@@ -1342,7 +1357,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                 {
                     // Change response to chunked
                     httpContext.Response.ContentLength = null;
-                    return TaskCache.CompletedTask;
+                    return Task.CompletedTask;
                 });
 
                 var response = Encoding.ASCII.GetBytes("hello, world");
@@ -1382,7 +1397,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                 {
                     // Change response to chunked
                     httpContext.Response.ContentLength = null;
-                    return TaskCache.CompletedTask;
+                    return Task.CompletedTask;
                 });
 
                 var response = Encoding.ASCII.GetBytes("hello, world");
@@ -1456,7 +1471,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
         [Fact]
         public async Task WhenResponseNotStartedResponseEndedAfterConsumingRequestBody()
         {
-            using (var server = new TestServer(httpContext => TaskCache.CompletedTask))
+            using (var server = new TestServer(httpContext => Task.CompletedTask))
             {
                 using (var connection = server.CreateConnection())
                 {
@@ -1779,6 +1794,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                     await connection.Send(
                         "GET / HTTP/1.1",
                         "Host:",
+                        "Connection: Upgrade",
                         "",
                         "");
                     await connection.ReceiveForcedEnd(
@@ -1793,7 +1809,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                 {
                     await connection.Send(
                         "GET / HTTP/1.0",
-                        "Connection: keep-alive",
+                        "Connection: keep-alive, Upgrade",
                         "",
                         "");
                     await connection.ReceiveForcedEnd(
@@ -1823,7 +1839,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                 response.OnStarting(_ =>
                 {
                     onStartingCalled = true;
-                    return TaskCache.CompletedTask;
+                    return Task.CompletedTask;
                 }, null);
 
                 // Anything added to the ResponseHeaders dictionary is ignored
@@ -2064,39 +2080,34 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
             Assert.Equal(1, testLogger.ApplicationErrorsLogged);
         }
 
+        [Theory]
         [MemberData(nameof(ConnectionAdapterData))]
-        public async Task FailedWritesResultInAbortedRequest(ListenOptions listenOptions)
+        public async Task ThrowsOnWriteWithRequestAbortedTokenAfterRequestIsAborted(ListenOptions listenOptions)
         {
-            var testContext = new TestServiceContext();
-
             // This should match _maxBytesPreCompleted in SocketOutput
             var maxBytesPreCompleted = 65536;
+
             // Ensure string is long enough to disable write-behind buffering
             var largeString = new string('a', maxBytesPreCompleted + 1);
 
             var writeTcs = new TaskCompletionSource<object>();
-            var registrationWh = new ManualResetEventSlim();
-            var connectionCloseWh = new ManualResetEventSlim();
+            var requestAbortedWh = new ManualResetEventSlim();
+            var requestStartWh = new ManualResetEventSlim();
 
             using (var server = new TestServer(async httpContext =>
             {
+                requestStartWh.Set();
+
                 var response = httpContext.Response;
                 var request = httpContext.Request;
                 var lifetime = httpContext.Features.Get<IHttpRequestLifetimeFeature>();
 
-                lifetime.RequestAborted.Register(() => registrationWh.Set());
-
-                await request.Body.CopyToAsync(Stream.Null);
-                connectionCloseWh.Wait();
+                lifetime.RequestAborted.Register(() => requestAbortedWh.Set());
+                Assert.True(requestAbortedWh.Wait(TimeSpan.FromSeconds(10)));
 
                 try
                 {
-                    // Ensure write is long enough to disable write-behind buffering
-                    for (int i = 0; i < 100; i++)
-                    {
-                        await response.WriteAsync(largeString, lifetime.RequestAborted);
-                        registrationWh.Wait(1000);
-                    }
+                    await response.WriteAsync(largeString, lifetime.RequestAborted);
                 }
                 catch (Exception ex)
                 {
@@ -2105,25 +2116,26 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                 }
 
                 writeTcs.SetException(new Exception("This shouldn't be reached."));
-            }, testContext, listenOptions))
+            }, new TestServiceContext(), listenOptions))
             {
                 using (var connection = server.CreateConnection())
                 {
                     await connection.Send(
                         "POST / HTTP/1.1",
                         "Host:",
-                        "Content-Length: 5",
+                        "Content-Length: 0",
                         "",
-                        "Hello");
-                    // Don't wait to receive the response. Just close the socket.
+                        "");
+
+                    Assert.True(requestStartWh.Wait(TimeSpan.FromSeconds(10)));
                 }
 
-                connectionCloseWh.Set();
+                // Write failed - can throw TaskCanceledException or OperationCanceledException,
+                // dependending on how far the canceled write goes.
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await writeTcs.Task).TimeoutAfter(TimeSpan.FromSeconds(15));
 
-                // Write failed
-                await Assert.ThrowsAsync<TaskCanceledException>(async () => await writeTcs.Task);
                 // RequestAborted tripped
-                Assert.True(registrationWh.Wait(1000));
+                Assert.True(requestAbortedWh.Wait(TimeSpan.FromSeconds(1)));
             }
         }
 
@@ -2171,7 +2183,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
             using (var server = new TestServer(httpContext =>
             {
                 httpContext.Abort();
-                return TaskCache.CompletedTask;
+                return Task.CompletedTask;
             }, testContext, listenOptions))
             {
                 using (var connection = server.CreateConnection())
@@ -2210,7 +2222,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                     Assert.Same(originalResponseHeaders, responseFeature.Headers);
                 }
 
-                return TaskCache.CompletedTask;
+                return Task.CompletedTask;
             }, testContext, listenOptions))
             {
                 using (var connection = server.CreateConnection())
@@ -2254,12 +2266,12 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                 {
                     callOrder.Push(1);
                     onStartingTcs.SetResult(null);
-                    return TaskCache.CompletedTask;
+                    return Task.CompletedTask;
                 }, null);
                 context.Response.OnStarting(_ =>
                 {
                     callOrder.Push(2);
-                    return TaskCache.CompletedTask;
+                    return Task.CompletedTask;
                 }, null);
 
                 context.Response.ContentLength = response.Length;
@@ -2306,12 +2318,12 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                 {
                     callOrder.Push(1);
                     onCompletedTcs.SetResult(null);
-                    return TaskCache.CompletedTask;
+                    return Task.CompletedTask;
                 }, null);
                 context.Response.OnCompleted(_ =>
                 {
                     callOrder.Push(2);
-                    return TaskCache.CompletedTask;
+                    return Task.CompletedTask;
                 }, null);
 
                 context.Response.ContentLength = response.Length;
@@ -2339,6 +2351,242 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
 
             Assert.Equal(1, callOrder.Pop());
             Assert.Equal(2, callOrder.Pop());
+        }
+
+
+        [Fact]
+        public async Task SynchronousWritesAllowedByDefault()
+        {
+            var firstRequest = true;
+
+            using (var server = new TestServer(async context =>
+            {
+                var bodyControlFeature = context.Features.Get<IHttpBodyControlFeature>();
+                Assert.True(bodyControlFeature.AllowSynchronousIO);
+
+                context.Response.ContentLength = 6;
+
+                if (firstRequest)
+                {
+                    context.Response.Body.Write(Encoding.ASCII.GetBytes("Hello1"), 0, 6);
+                    firstRequest = false;
+                }
+                else
+                {
+                    bodyControlFeature.AllowSynchronousIO = false;
+
+                    // Synchronous writes now throw.
+                    var ioEx = Assert.Throws<InvalidOperationException>(() => context.Response.Body.Write(Encoding.ASCII.GetBytes("What!?"), 0, 6));
+                    Assert.Equal(CoreStrings.SynchronousWritesDisallowed, ioEx.Message);
+
+                    await context.Response.Body.WriteAsync(Encoding.ASCII.GetBytes("Hello2"), 0, 6);
+                }
+            }))
+            {
+                using (var connection = server.CreateConnection())
+                {
+                    await connection.SendEmptyGet();
+                    await connection.Receive(
+                        "HTTP/1.1 200 OK",
+                        $"Date: {server.Context.DateHeaderValue}",
+                        "Content-Length: 6",
+                        "",
+                        "Hello1");
+
+                    await connection.SendEmptyGet();
+                    await connection.Receive(
+                        "HTTP/1.1 200 OK",
+                        $"Date: {server.Context.DateHeaderValue}",
+                        "Content-Length: 6",
+                        "",
+                        "Hello2");
+                }
+            }
+        }
+
+        [Fact]
+        public async Task SynchronousWritesCanBeDisallowedGlobally()
+        {
+            var testContext = new TestServiceContext
+            {
+                ServerOptions = { AllowSynchronousIO = false }
+            };
+
+            using (var server = new TestServer(context =>
+            {
+                var bodyControlFeature = context.Features.Get<IHttpBodyControlFeature>();
+                Assert.False(bodyControlFeature.AllowSynchronousIO);
+
+                context.Response.ContentLength = 6;
+
+                // Synchronous writes now throw.
+                var ioEx = Assert.Throws<InvalidOperationException>(() => context.Response.Body.Write(Encoding.ASCII.GetBytes("What!?"), 0, 6));
+                Assert.Equal(CoreStrings.SynchronousWritesDisallowed, ioEx.Message);
+
+                return context.Response.Body.WriteAsync(Encoding.ASCII.GetBytes("Hello!"), 0, 6);
+            }, testContext))
+            {
+                using (var connection = server.CreateConnection())
+                {
+                    await connection.Send(
+                        "GET / HTTP/1.1",
+                        "Host:",
+                        "",
+                        "");
+                    await connection.Receive(
+                        "HTTP/1.1 200 OK",
+                        $"Date: {server.Context.DateHeaderValue}",
+                        "Content-Length: 6",
+                        "",
+                        "Hello!");
+                }
+            }
+        }
+
+        [Fact]
+        public async Task ConnectionClosedWhenResponseDoesNotSatisfyMinimumDataRate()
+        {
+            var chunkSize = 64 * 1024;
+            var chunks = 128;
+
+            var messageLogged = new ManualResetEventSlim();
+
+            var mockKestrelTrace = new Mock<IKestrelTrace>();
+            mockKestrelTrace
+                .Setup(trace => trace.ResponseMininumDataRateNotSatisfied(It.IsAny<string>(), It.IsAny<string>()))
+                .Callback(() => messageLogged.Set());
+
+            var testContext = new TestServiceContext
+            {
+                Log = mockKestrelTrace.Object,
+                SystemClock = new SystemClock(),
+                ServerOptions =
+                {
+                    Limits =
+                    {
+                        MinResponseDataRate = new MinDataRate(bytesPerSecond: double.MaxValue, gracePeriod: TimeSpan.FromSeconds(2))
+                    }
+                }
+            };
+
+            var aborted = new ManualResetEventSlim();
+
+            using (var server = new TestServer(async context =>
+            {
+                context.RequestAborted.Register(() =>
+                {
+                    aborted.Set();
+                });
+
+                context.Response.ContentLength = chunks * chunkSize;
+
+                for (var i = 0; i < chunks; i++)
+                {
+                    await context.Response.WriteAsync(new string('a', chunkSize), context.RequestAborted);
+                }
+            }, testContext))
+            {
+                using (var connection = server.CreateConnection())
+                {
+                    await connection.Send(
+                        "GET / HTTP/1.1",
+                        "Host:",
+                        "",
+                        "");
+
+                    Assert.True(aborted.Wait(TimeSpan.FromSeconds(60)));
+
+                    await connection.Receive(
+                        "HTTP/1.1 200 OK",
+                        "");
+                    await connection.ReceiveStartsWith("Date: ");
+                    await connection.Receive(
+                        $"Content-Length: {chunks * chunkSize}",
+                        "",
+                        "");
+
+                    await Assert.ThrowsAsync<EqualException>(async () => await connection.ReceiveForcedEnd(
+                        new string('a', chunks * chunkSize)));
+
+                    Assert.True(messageLogged.Wait(TimeSpan.FromSeconds(10)));
+                }
+            }
+        }
+
+        [Fact]
+        public async Task HttpsConnectionClosedWhenResponseDoesNotSatisfyMinimumDataRate()
+        {
+            const int chunkSize = 64 * 1024;
+            const int chunks = 128;
+
+            var certificate = new X509Certificate2(TestResources.TestCertificatePath, "testPassword");
+
+            var messageLogged = new ManualResetEventSlim();
+            var aborted = new ManualResetEventSlim();
+
+            var mockKestrelTrace = new Mock<IKestrelTrace>();
+            mockKestrelTrace
+                .Setup(trace => trace.ResponseMininumDataRateNotSatisfied(It.IsAny<string>(), It.IsAny<string>()))
+                .Callback(() => messageLogged.Set());
+
+            var testContext = new TestServiceContext
+            {
+                Log = mockKestrelTrace.Object,
+                SystemClock = new SystemClock(),
+                ServerOptions =
+                {
+                    Limits =
+                    {
+                        MinResponseDataRate = new MinDataRate(bytesPerSecond: double.MaxValue, gracePeriod: TimeSpan.FromSeconds(2))
+                    }
+                }
+            };
+
+            var listenOptions = new ListenOptions(new IPEndPoint(IPAddress.Loopback, 0))
+            {
+                ConnectionAdapters =
+                {
+                    new HttpsConnectionAdapter(new HttpsConnectionAdapterOptions { ServerCertificate = certificate })
+                }
+            };
+
+            using (var server = new TestServer(async context =>
+            {
+                context.RequestAborted.Register(() =>
+                {
+                    aborted.Set();
+                });
+
+                context.Response.ContentLength = chunks * chunkSize;
+
+                for (var i = 0; i < chunks; i++)
+                {
+                    await context.Response.WriteAsync(new string('a', chunkSize), context.RequestAborted);
+                }
+            }, testContext, listenOptions))
+            {
+                using (var client = new TcpClient())
+                {
+                    await client.ConnectAsync(IPAddress.Loopback, server.Port);
+
+                    using (var sslStream = new SslStream(client.GetStream(), false, (sender, cert, chain, errors) => true, null))
+                    {
+                        await sslStream.AuthenticateAsClientAsync("localhost", new X509CertificateCollection(), SslProtocols.Tls12 | SslProtocols.Tls11, false);
+
+                        var request = Encoding.ASCII.GetBytes("GET / HTTP/1.1\r\nHost:\r\n\r\n");
+                        await sslStream.WriteAsync(request, 0, request.Length);
+
+                        Assert.True(aborted.Wait(TimeSpan.FromSeconds(60)));
+
+                        using (var reader = new StreamReader(sslStream, encoding: Encoding.ASCII, detectEncodingFromByteOrderMarks: false, bufferSize: 1024, leaveOpen: false))
+                        {
+                            await reader.ReadToEndAsync().TimeoutAfter(TimeSpan.FromSeconds(30));
+                        }
+
+                        Assert.True(messageLogged.Wait(TimeSpan.FromSeconds(10)));
+                    }
+                }
+            }
         }
 
         public static TheoryData<string, StringValues, string> NullHeaderData

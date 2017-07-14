@@ -4,7 +4,7 @@
 using System.Diagnostics.Tracing;
 using System.Runtime.CompilerServices;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http;
-using Microsoft.AspNetCore.Server.Kestrel.Transport.Abstractions;
+using Microsoft.AspNetCore.Server.Kestrel.Transport.Abstractions.Internal;
 
 namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure
 {
@@ -66,6 +66,16 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure
         private void ConnectionStop(string connectionId)
         {
             WriteEvent(2, connectionId);
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        [Event(5, Level = EventLevel.Verbose)]
+        public void ConnectionRejected(string connectionId)
+        {
+            if (IsEnabled())
+            {
+                WriteEvent(5, connectionId);
+            }
         }
 
         [NonEvent]

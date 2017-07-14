@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
-using Microsoft.AspNetCore.Server.Kestrel.Core;
+using System.Threading;
 using Xunit;
 
 namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
@@ -105,10 +105,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
         [InlineData(0)]
         public void MaxRequestHeadersTotalSizeInvalid(int value)
         {
-            Assert.Throws<ArgumentOutOfRangeException>(() =>
-            {
-                (new KestrelServerLimits()).MaxRequestHeadersTotalSize = value;
-            });
+            var ex = Assert.Throws<ArgumentOutOfRangeException>(() => new KestrelServerLimits().MaxRequestHeadersTotalSize = value);
+            Assert.StartsWith(CoreStrings.PositiveNumberRequired, ex.Message);
         }
 
         [Theory]
@@ -156,16 +154,26 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
         }
 
         [Theory]
-        [InlineData(0)]
-        [InlineData(0.5)]
-        [InlineData(2.1)]
-        [InlineData(2.5)]
-        [InlineData(2.9)]
-        public void KeepAliveTimeoutValid(double seconds)
+        [MemberData(nameof(TimeoutValidData))]
+        public void KeepAliveTimeoutValid(TimeSpan value)
         {
-            var o = new KestrelServerLimits();
-            o.KeepAliveTimeout = TimeSpan.FromSeconds(seconds);
-            Assert.Equal(seconds, o.KeepAliveTimeout.TotalSeconds);
+            Assert.Equal(value, new KestrelServerLimits { KeepAliveTimeout = value }.KeepAliveTimeout);
+        }
+
+        [Fact]
+        public void KeepAliveTimeoutCanBeSetToInfinite()
+        {
+            Assert.Equal(TimeSpan.MaxValue, new KestrelServerLimits { KeepAliveTimeout = Timeout.InfiniteTimeSpan }.KeepAliveTimeout);
+        }
+
+        [Theory]
+        [MemberData(nameof(TimeoutInvalidData))]
+        public void KeepAliveTimeoutInvalid(TimeSpan value)
+        {
+            var exception = Assert.Throws<ArgumentOutOfRangeException>(() => new KestrelServerLimits { KeepAliveTimeout = value });
+
+            Assert.Equal("value", exception.ParamName);
+            Assert.StartsWith(CoreStrings.PositiveTimeSpanRequired, exception.Message);
         }
 
         [Fact]
@@ -175,17 +183,147 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
         }
 
         [Theory]
-        [InlineData(0)]
-        [InlineData(0.5)]
-        [InlineData(1.0)]
-        [InlineData(2.5)]
-        [InlineData(10)]
-        [InlineData(60)]
-        public void RequestHeadersTimeoutValid(double seconds)
+        [MemberData(nameof(TimeoutValidData))]
+        public void RequestHeadersTimeoutValid(TimeSpan value)
         {
-            var o = new KestrelServerLimits();
-            o.RequestHeadersTimeout = TimeSpan.FromSeconds(seconds);
-            Assert.Equal(seconds, o.RequestHeadersTimeout.TotalSeconds);
+            Assert.Equal(value, new KestrelServerLimits { RequestHeadersTimeout = value }.RequestHeadersTimeout);
         }
+
+        [Fact]
+        public void RequestHeadersTimeoutCanBeSetToInfinite()
+        {
+            Assert.Equal(TimeSpan.MaxValue, new KestrelServerLimits { RequestHeadersTimeout = Timeout.InfiniteTimeSpan }.RequestHeadersTimeout);
+        }
+
+        [Theory]
+        [MemberData(nameof(TimeoutInvalidData))]
+        public void RequestHeadersTimeoutInvalid(TimeSpan value)
+        {
+            var exception = Assert.Throws<ArgumentOutOfRangeException>(() => new KestrelServerLimits { RequestHeadersTimeout = value });
+
+            Assert.Equal("value", exception.ParamName);
+            Assert.StartsWith(CoreStrings.PositiveTimeSpanRequired, exception.Message);
+        }
+
+        [Fact]
+        public void MaxConnectionsDefault()
+        {
+            Assert.Null(new KestrelServerLimits().MaxConcurrentConnections);
+            Assert.Null(new KestrelServerLimits().MaxConcurrentUpgradedConnections);
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData(1u)]
+        [InlineData(long.MaxValue)]
+        public void MaxConnectionsValid(long? value)
+        {
+            var limits = new KestrelServerLimits
+            {
+                MaxConcurrentConnections = value
+            };
+
+            Assert.Equal(value, limits.MaxConcurrentConnections);
+        }
+
+        [Theory]
+        [InlineData(long.MinValue)]
+        [InlineData(-1)]
+        [InlineData(0)]
+        public void MaxConnectionsInvalid(long value)
+        {
+            var ex = Assert.Throws<ArgumentOutOfRangeException>(() => new KestrelServerLimits().MaxConcurrentConnections = value);
+            Assert.StartsWith(CoreStrings.PositiveNumberOrNullRequired, ex.Message);
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData(0)]
+        [InlineData(1)]
+        [InlineData(long.MaxValue)]
+        public void MaxUpgradedConnectionsValid(long? value)
+        {
+            var limits = new KestrelServerLimits
+            {
+                MaxConcurrentUpgradedConnections = value
+            };
+
+            Assert.Equal(value, limits.MaxConcurrentUpgradedConnections);
+        }
+
+
+        [Theory]
+        [InlineData(long.MinValue)]
+        [InlineData(-1)]
+        public void MaxUpgradedConnectionsInvalid(long value)
+        {
+            var ex = Assert.Throws<ArgumentOutOfRangeException>(() => new KestrelServerLimits().MaxConcurrentUpgradedConnections = value);
+            Assert.StartsWith(CoreStrings.NonNegativeNumberOrNullRequired, ex.Message);
+        }
+
+        [Fact]
+        public void MaxRequestBodySizeDefault()
+        {
+            // ~28.6 MB (https://www.iis.net/configreference/system.webserver/security/requestfiltering/requestlimits#005)
+            Assert.Equal(30000000, new KestrelServerLimits().MaxRequestBodySize);
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData(0)]
+        [InlineData(1)]
+        [InlineData(long.MaxValue)]
+        public void MaxRequestBodySizeValid(long? value)
+        {
+            var limits = new KestrelServerLimits
+            {
+                MaxRequestBodySize = value
+            };
+
+            Assert.Equal(value, limits.MaxRequestBodySize);
+        }
+
+        [Theory]
+        [InlineData(long.MinValue)]
+        [InlineData(-1)]
+        public void MaxRequestBodySizeInvalid(long value)
+        {
+            var ex = Assert.Throws<ArgumentOutOfRangeException>(() => new KestrelServerLimits().MaxRequestBodySize = value);
+            Assert.StartsWith(CoreStrings.NonNegativeNumberOrNullRequired, ex.Message);
+        }
+
+        [Fact]
+        public void MinRequestBodyDataRateDefault()
+        {
+            Assert.NotNull(new KestrelServerLimits().MinRequestBodyDataRate);
+            Assert.Equal(240, new KestrelServerLimits().MinRequestBodyDataRate.BytesPerSecond);
+            Assert.Equal(TimeSpan.FromSeconds(5), new KestrelServerLimits().MinRequestBodyDataRate.GracePeriod);
+        }
+
+        [Fact]
+        public void MinResponseBodyDataRateDefault()
+        {
+            Assert.NotNull(new KestrelServerLimits().MinResponseDataRate);
+            Assert.Equal(240, new KestrelServerLimits().MinResponseDataRate.BytesPerSecond);
+            Assert.Equal(TimeSpan.FromSeconds(5), new KestrelServerLimits().MinResponseDataRate.GracePeriod);
+        }
+
+        public static TheoryData<TimeSpan> TimeoutValidData => new TheoryData<TimeSpan>
+        {
+            TimeSpan.FromTicks(1),
+            TimeSpan.MaxValue,
+        };
+
+        public static TheoryData<TimeSpan> TimeoutInfiniteData => new TheoryData<TimeSpan>
+        {
+            Timeout.InfiniteTimeSpan,
+        };
+
+        public static TheoryData<TimeSpan> TimeoutInvalidData => new TheoryData<TimeSpan>
+        {
+            TimeSpan.MinValue,
+            TimeSpan.FromTicks(-1),
+            TimeSpan.Zero
+        };
     }
 }

@@ -3,7 +3,7 @@
 
 using System.Net;
 
-namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Abstractions
+namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Abstractions.Internal
 {
     public interface IEndPointInformation
     {
@@ -30,6 +30,13 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Abstractions
         /// Only set if <see cref="Type"/> is <see cref="ListenType.FileHandle"/>.
         /// </summary>
         ulong FileHandle { get; }
+
+        //  HandleType is mutable so it can be re-specified later.
+        /// <summary>
+        /// The type of file descriptor being used.
+        /// Only set if <see cref="Type"/> is <see cref="ListenType.FileHandle"/>.
+        /// </summary>
+        FileHandleType HandleType { get; set; }
 
         /// <summary>
         /// Set to false to enable Nagle's algorithm for all connections.

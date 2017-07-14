@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Http.Features.Authentication;
+using Microsoft.AspNetCore.Server.Kestrel.Core.Features;
 
 namespace CodeGenerator
 {
@@ -27,14 +28,14 @@ namespace CodeGenerator
                 typeof(IHttpRequestIdentifierFeature),
                 typeof(IServiceProvidersFeature),
                 typeof(IHttpRequestLifetimeFeature),
-                typeof(IHttpConnectionFeature)
+                typeof(IHttpConnectionFeature),
             };
 
             var commonFeatures = new[]
             {
                 typeof(IHttpAuthenticationFeature),
                 typeof(IQueryFeature),
-                typeof(IFormFeature)
+                typeof(IFormFeature),
             };
 
             var sometimesFeatures = new[]
@@ -44,12 +45,16 @@ namespace CodeGenerator
                 typeof(IItemsFeature),
                 typeof(ITlsConnectionFeature),
                 typeof(IHttpWebSocketFeature),
-                typeof(ISessionFeature)
+                typeof(ISessionFeature),
+                typeof(IHttpMaxRequestBodySizeFeature),
+                typeof(IHttpMinRequestBodyDataRateFeature),
+                typeof(IHttpMinResponseDataRateFeature),
+                typeof(IHttpBodyControlFeature),
             };
 
             var rareFeatures = new[]
             {
-                typeof(IHttpSendFileFeature)
+                typeof(IHttpSendFileFeature),
             };
 
             var allFeatures = alwaysFeatures.Concat(commonFeatures).Concat(sometimesFeatures).Concat(rareFeatures);
@@ -64,6 +69,10 @@ namespace CodeGenerator
                 typeof(IHttpRequestIdentifierFeature),
                 typeof(IHttpRequestLifetimeFeature),
                 typeof(IHttpConnectionFeature),
+                typeof(IHttpMaxRequestBodySizeFeature),
+                typeof(IHttpMinRequestBodyDataRateFeature),
+                typeof(IHttpMinResponseDataRateFeature),
+                typeof(IHttpBodyControlFeature),
             };
 
             return $@"// Copyright (c) .NET Foundation. All rights reserved.

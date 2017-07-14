@@ -5,7 +5,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Server.Kestrel.Transport.Abstractions;
+using Microsoft.AspNetCore.Server.Kestrel.Transport.Abstractions.Internal;
 using Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Internal.Networking;
 using Microsoft.Extensions.Logging;
 
@@ -78,13 +78,13 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Internal
             }
         }
 
-        private static void ConnectCallback(UvConnectRequest connect, int status, Exception error, TaskCompletionSource<int> tcs)
+        private static void ConnectCallback(UvConnectRequest connect, int status, UvException error, TaskCompletionSource<int> tcs)
         {
             var listener = (ListenerSecondary)tcs.Task.AsyncState;
             listener.ConnectedCallback(connect, status, error, tcs);
         }
 
-        private async void ConnectedCallback(UvConnectRequest connect, int status, Exception error, TaskCompletionSource<int> tcs)
+        private async void ConnectedCallback(UvConnectRequest connect, int status, UvException error, TaskCompletionSource<int> tcs)
         {
             connect.Dispose();
             if (error != null)
@@ -133,8 +133,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Internal
             {
                 if (status != LibuvConstants.EOF)
                 {
-                    Exception ex;
-                    Thread.Loop.Libuv.Check(status, out ex);
+                    Thread.Loop.Libuv.Check(status, out var ex);
                     Log.LogError(0, ex, "DispatchPipe.ReadStart");
                 }
 

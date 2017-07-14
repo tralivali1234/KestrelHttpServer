@@ -8,13 +8,14 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Testing;
+using Microsoft.Extensions.Logging;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
 {
@@ -28,6 +29,13 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
             $"Content-Length: {_dataLength}\r\n",
             "\r\n"
         };
+
+        private readonly Action<ILoggingBuilder> _configureLoggingDelegate;
+
+        public MaxRequestBufferSizeTests(ITestOutputHelper output)
+        {
+            _configureLoggingDelegate = builder => builder.AddXunit(output);
+        }
 
         public static IEnumerable<object[]> LargeUploadData
         {
@@ -55,7 +63,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                     Tuple.Create((long?)_dataLength - 1, false),
 
                     // Buffer is exactly the same size as data.  Exposed race condition where
-                    // IConnectionControl.Resume() was called after socket was disconnected.
+                    // the connection was resumed after socket was disconnected.
                     Tuple.Create((long?)_dataLength, false),
 
                     // Largest possible buffer, should never trigger backpressure.
@@ -244,13 +252,14 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
             }
         }
 
-        private static IWebHost StartWebHost(long? maxRequestBufferSize, 
-            byte[] expectedBody, 
-            bool useConnectionAdapter, 
+        private IWebHost StartWebHost(long? maxRequestBufferSize,
+            byte[] expectedBody,
+            bool useConnectionAdapter,
             TaskCompletionSource<object> startReadingRequestBody,
             TaskCompletionSource<object> clientFinishedSendingRequestBody)
         {
             var host = new WebHostBuilder()
+                .ConfigureLogging(_configureLoggingDelegate)
                 .UseKestrel(options =>
                 {
                     options.Listen(new IPEndPoint(IPAddress.Loopback, 0), listenOptions =>
@@ -274,11 +283,13 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                     {
                         options.Limits.MaxRequestHeadersTotalSize = (int)maxRequestBufferSize;
                     }
+
+                    options.Limits.MinRequestBodyDataRate = null;
                 })
                 .UseContentRoot(Directory.GetCurrentDirectory())
                 .Configure(app => app.Run(async context =>
                 {
-                    await startReadingRequestBody.Task.TimeoutAfter(TimeSpan.FromSeconds(30));
+                    await startReadingRequestBody.Task.TimeoutAfter(TimeSpan.FromSeconds(120));
 
                     var buffer = new byte[expectedBody.Length];
                     var bytesRead = 0;
@@ -290,7 +301,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.FunctionalTests
                     await clientFinishedSendingRequestBody.Task.TimeoutAfter(TimeSpan.FromSeconds(120));
 
                     // Verify client didn't send extra bytes
-                    if (context.Request.Body.ReadByte() != -1)
+                    if (await context.Request.Body.ReadAsync(new byte[1], 0, 1) != 0)
                     {
                         context.Response.StatusCode = StatusCodes.Status500InternalServerError;
                         await context.Response.WriteAsync("Client sent more bytes than expectedBody.Length");

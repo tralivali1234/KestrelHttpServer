@@ -3,23 +3,24 @@
 
 using System;
 using System.IO;
-using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure;
-using Microsoft.AspNetCore.Server.Kestrel.Transport.Abstractions;
-using Microsoft.Extensions.Internal;
+using Microsoft.AspNetCore.Server.Kestrel.Transport.Abstractions.Internal;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
 {
     internal class FrameRequestStream : ReadOnlyStream
     {
+        private readonly IHttpBodyControlFeature _bodyControl;
         private MessageBody _body;
         private FrameStreamState _state;
         private Exception _error;
 
-        public FrameRequestStream()
+        public FrameRequestStream(IHttpBodyControlFeature bodyControl)
         {
+            _bodyControl = bodyControl;
             _state = FrameStreamState.Closed;
         }
 
@@ -36,13 +37,12 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
 
         public override void Flush()
         {
-            // No-op.
+            throw new NotSupportedException();
         }
 
         public override Task FlushAsync(CancellationToken cancellationToken)
         {
-            // No-op.
-            return TaskCache.CompletedTask;
+            throw new NotSupportedException();
         }
 
         public override long Seek(long offset, SeekOrigin origin)
@@ -57,8 +57,12 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
 
         public override int Read(byte[] buffer, int offset, int count)
         {
-            // ValueTask uses .GetAwaiter().GetResult() if necessary
-            return ReadAsync(buffer, offset, count).Result;
+            if (!_bodyControl.AllowSynchronousIO)
+            {
+                throw new InvalidOperationException(CoreStrings.SynchronousReadsDisallowed);
+            }
+
+            return ReadAsync(buffer, offset, count).GetAwaiter().GetResult();
         }
 
         public override IAsyncResult BeginRead(byte[] buffer, int offset, int count, AsyncCallback callback, object state)
@@ -130,7 +134,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
             }
             if (bufferSize <= 0)
             {
-                throw new ArgumentException(CoreStrings.PositiveIntRequired, nameof(bufferSize));
+                throw new ArgumentException(CoreStrings.PositiveNumberRequired, nameof(bufferSize));
             }
 
             var task = ValidateState(cancellationToken);
@@ -167,14 +171,6 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
         public void PauseAcceptingReads()
         {
             _state = FrameStreamState.Closed;
-        }
-
-        public void ResumeAcceptingReads()
-        {
-            if (_state == FrameStreamState.Closed)
-            {
-                _state = FrameStreamState.Open;
-            }
         }
 
         public void StopAcceptingReads()

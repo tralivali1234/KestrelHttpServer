@@ -7,7 +7,8 @@ using System.Globalization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure;
-using Microsoft.AspNetCore.Server.Kestrel.Transport.Abstractions;
+using Microsoft.AspNetCore.Server.Kestrel.Internal.System.IO.Pipelines;
+using Microsoft.AspNetCore.Server.Kestrel.Transport.Abstractions.Internal;
 using Microsoft.AspNetCore.Testing;
 using Microsoft.Extensions.Primitives;
 using Moq;
@@ -23,7 +24,10 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
             var frameContext = new FrameContext
             {
                 ServiceContext = new TestServiceContext(),
-                ConnectionInformation = Mock.Of<IConnectionInformation>(),
+                ConnectionInformation = new MockConnectionInformation
+                {
+                    PipeFactory = new PipeFactory()
+                },
                 TimeoutControl = null
             };
 
@@ -66,7 +70,6 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
         [InlineData("Ser™ver", "Data")]
         [InlineData("Server", "Da™ta")]
         [InlineData("Unknown™-Header", "Data")]
-        [InlineData("Ser™ver", "Data")]
         [InlineData("šerver", "Data")]
         [InlineData("Server", "Dašta")]
         [InlineData("Unknownš-Header", "Data")]
@@ -218,7 +221,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
 
             dictionary.Remove("Content-Length");
 
-            Assert.Equal(null, headers.ContentLength);
+            Assert.Null(headers.ContentLength);
         }
 
         [Fact]
@@ -230,7 +233,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
 
             dictionary.Clear();
 
-            Assert.Equal(null, headers.ContentLength);
+            Assert.Null(headers.ContentLength);
         }
 
         private static long ParseLong(string value)

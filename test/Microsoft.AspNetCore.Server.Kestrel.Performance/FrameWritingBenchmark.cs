@@ -9,7 +9,6 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http;
 using Microsoft.AspNetCore.Server.Kestrel.Internal.System.IO.Pipelines;
-using Microsoft.AspNetCore.Server.Kestrel.Performance.Mocks;
 using Microsoft.AspNetCore.Testing;
 
 namespace Microsoft.AspNetCore.Server.Kestrel.Performance
@@ -36,18 +35,6 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Performance
 
             _frameChunked.Reset();
             _frameChunked.RequestHeaders.Add("Transfer-Encoding", "chunked");
-        }
-
-        [Benchmark]
-        public void Write()
-        {
-            _frame.Write(new ArraySegment<byte>(_writeData));
-        }
-
-        [Benchmark]
-        public void WriteChunked()
-        {
-            _frameChunked.Write(new ArraySegment<byte>(_writeData));
         }
 
         [Benchmark]
@@ -88,9 +75,9 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Performance
 
         private TestFrame<object> MakeFrame()
         {
-            var factory = new PipeFactory();
-            var input = factory.Create();
-            var output = factory.Create();
+            var pipeFactory = new PipeFactory();
+            var input = pipeFactory.Create();
+            var output = pipeFactory.Create();
 
             var serviceContext = new ServiceContext
             {
@@ -103,7 +90,10 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Performance
             var frame = new TestFrame<object>(application: null, context: new FrameContext
             {
                 ServiceContext = serviceContext,
-                ConnectionInformation = new MockConnectionInformation(),
+                ConnectionInformation = new MockConnectionInformation
+                {
+                    PipeFactory = pipeFactory
+                },
                 Input = input.Reader,
                 Output = output
             });

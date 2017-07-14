@@ -529,46 +529,60 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core
             => string.Format(CultureInfo.CurrentCulture, GetString("InvalidContentLength_InvalidNumber", "value"), value);
 
         /// <summary>
-        /// Value must be null or a non-negative integer.
+        /// Value must be null or a non-negative number.
         /// </summary>
-        internal static string NonNegativeNullableIntRequired
+        internal static string NonNegativeNumberOrNullRequired
         {
-            get => GetString("NonNegativeNullableIntRequired");
+            get => GetString("NonNegativeNumberOrNullRequired");
         }
 
         /// <summary>
-        /// Value must be null or a non-negative integer.
+        /// Value must be null or a non-negative number.
         /// </summary>
-        internal static string FormatNonNegativeNullableIntRequired()
-            => GetString("NonNegativeNullableIntRequired");
+        internal static string FormatNonNegativeNumberOrNullRequired()
+            => GetString("NonNegativeNumberOrNullRequired");
 
         /// <summary>
-        /// Value must be a positive integer.
+        /// Value must be a non-negative number.
         /// </summary>
-        internal static string PositiveIntRequired
+        internal static string NonNegativeNumberRequired
         {
-            get => GetString("PositiveIntRequired");
+            get => GetString("NonNegativeNumberRequired");
         }
 
         /// <summary>
-        /// Value must be a positive integer.
+        /// Value must be a non-negative number.
         /// </summary>
-        internal static string FormatPositiveIntRequired()
-            => GetString("PositiveIntRequired");
+        internal static string FormatNonNegativeNumberRequired()
+            => GetString("NonNegativeNumberRequired");
 
         /// <summary>
-        /// Value must be null or a positive integer.
+        /// Value must be a positive number.
         /// </summary>
-        internal static string PositiveNullableIntRequired
+        internal static string PositiveNumberRequired
         {
-            get => GetString("PositiveNullableIntRequired");
+            get => GetString("PositiveNumberRequired");
         }
 
         /// <summary>
-        /// Value must be null or a positive integer.
+        /// Value must be a positive number.
         /// </summary>
-        internal static string FormatPositiveNullableIntRequired()
-            => GetString("PositiveNullableIntRequired");
+        internal static string FormatPositiveNumberRequired()
+            => GetString("PositiveNumberRequired");
+
+        /// <summary>
+        /// Value must be null or a positive number.
+        /// </summary>
+        internal static string PositiveNumberOrNullRequired
+        {
+            get => GetString("PositiveNumberOrNullRequired");
+        }
+
+        /// <summary>
+        /// Value must be null or a positive number.
+        /// </summary>
+        internal static string FormatPositiveNumberOrNullRequired()
+            => GetString("PositiveNumberOrNullRequired");
 
         /// <summary>
         /// Unix socket path must be absolute.
@@ -891,6 +905,174 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core
         /// </summary>
         internal static string FormatRequestProcessingEndError()
             => GetString("RequestProcessingEndError");
+
+        /// <summary>
+        /// Cannot upgrade a non-upgradable request. Check IHttpUpgradeFeature.IsUpgradableRequest to determine if a request can be upgraded.
+        /// </summary>
+        internal static string CannotUpgradeNonUpgradableRequest
+        {
+            get => GetString("CannotUpgradeNonUpgradableRequest");
+        }
+
+        /// <summary>
+        /// Cannot upgrade a non-upgradable request. Check IHttpUpgradeFeature.IsUpgradableRequest to determine if a request can be upgraded.
+        /// </summary>
+        internal static string FormatCannotUpgradeNonUpgradableRequest()
+            => GetString("CannotUpgradeNonUpgradableRequest");
+
+        /// <summary>
+        /// Request cannot be upgraded because the server has already opened the maximum number of upgraded connections.
+        /// </summary>
+        internal static string UpgradedConnectionLimitReached
+        {
+            get => GetString("UpgradedConnectionLimitReached");
+        }
+
+        /// <summary>
+        /// Request cannot be upgraded because the server has already opened the maximum number of upgraded connections.
+        /// </summary>
+        internal static string FormatUpgradedConnectionLimitReached()
+            => GetString("UpgradedConnectionLimitReached");
+
+        /// <summary>
+        /// IHttpUpgradeFeature.UpgradeAsync was already called and can only be called once per connection.
+        /// </summary>
+        internal static string UpgradeCannotBeCalledMultipleTimes
+        {
+            get => GetString("UpgradeCannotBeCalledMultipleTimes");
+        }
+
+        /// <summary>
+        /// IHttpUpgradeFeature.UpgradeAsync was already called and can only be called once per connection.
+        /// </summary>
+        internal static string FormatUpgradeCannotBeCalledMultipleTimes()
+            => GetString("UpgradeCannotBeCalledMultipleTimes");
+
+        /// <summary>
+        /// Request body too large.
+        /// </summary>
+        internal static string BadRequest_RequestBodyTooLarge
+        {
+            get => GetString("BadRequest_RequestBodyTooLarge");
+        }
+
+        /// <summary>
+        /// Request body too large.
+        /// </summary>
+        internal static string FormatBadRequest_RequestBodyTooLarge()
+            => GetString("BadRequest_RequestBodyTooLarge");
+
+        /// <summary>
+        /// The maximum request body size cannot be modified after the app has already started reading from the request body.
+        /// </summary>
+        internal static string MaxRequestBodySizeCannotBeModifiedAfterRead
+        {
+            get => GetString("MaxRequestBodySizeCannotBeModifiedAfterRead");
+        }
+
+        /// <summary>
+        /// The maximum request body size cannot be modified after the app has already started reading from the request body.
+        /// </summary>
+        internal static string FormatMaxRequestBodySizeCannotBeModifiedAfterRead()
+            => GetString("MaxRequestBodySizeCannotBeModifiedAfterRead");
+
+        /// <summary>
+        /// The maximum request body size cannot be modified after the request has been upgraded.
+        /// </summary>
+        internal static string MaxRequestBodySizeCannotBeModifiedForUpgradedRequests
+        {
+            get => GetString("MaxRequestBodySizeCannotBeModifiedForUpgradedRequests");
+        }
+
+        /// <summary>
+        /// The maximum request body size cannot be modified after the request has been upgraded.
+        /// </summary>
+        internal static string FormatMaxRequestBodySizeCannotBeModifiedForUpgradedRequests()
+            => GetString("MaxRequestBodySizeCannotBeModifiedForUpgradedRequests");
+
+        /// <summary>
+        /// Value must be a positive TimeSpan.
+        /// </summary>
+        internal static string PositiveTimeSpanRequired
+        {
+            get => GetString("PositiveTimeSpanRequired");
+        }
+
+        /// <summary>
+        /// Value must be a positive TimeSpan.
+        /// </summary>
+        internal static string FormatPositiveTimeSpanRequired()
+            => GetString("PositiveTimeSpanRequired");
+
+        /// <summary>
+        /// Value must be a non-negative TimeSpan.
+        /// </summary>
+        internal static string NonNegativeTimeSpanRequired
+        {
+            get => GetString("NonNegativeTimeSpanRequired");
+        }
+
+        /// <summary>
+        /// Value must be a non-negative TimeSpan.
+        /// </summary>
+        internal static string FormatNonNegativeTimeSpanRequired()
+            => GetString("NonNegativeTimeSpanRequired");
+
+        /// <summary>
+        /// The request body rate enforcement grace period must be greater than {heartbeatInterval} second.
+        /// </summary>
+        internal static string MinimumGracePeriodRequired
+        {
+            get => GetString("MinimumGracePeriodRequired");
+        }
+
+        /// <summary>
+        /// The request body rate enforcement grace period must be greater than {heartbeatInterval} second.
+        /// </summary>
+        internal static string FormatMinimumGracePeriodRequired(object heartbeatInterval)
+            => string.Format(CultureInfo.CurrentCulture, GetString("MinimumGracePeriodRequired", "heartbeatInterval"), heartbeatInterval);
+
+        /// <summary>
+        /// Synchronous operations are disallowed. Call ReadAsync or set AllowSynchronousIO to true instead.
+        /// </summary>
+        internal static string SynchronousReadsDisallowed
+        {
+            get => GetString("SynchronousReadsDisallowed");
+        }
+
+        /// <summary>
+        /// Synchronous operations are disallowed. Call ReadAsync or set AllowSynchronousIO to true instead.
+        /// </summary>
+        internal static string FormatSynchronousReadsDisallowed()
+            => GetString("SynchronousReadsDisallowed");
+
+        /// <summary>
+        /// Synchronous operations are disallowed. Call WriteAsync or set AllowSynchronousIO to true instead.
+        /// </summary>
+        internal static string SynchronousWritesDisallowed
+        {
+            get => GetString("SynchronousWritesDisallowed");
+        }
+
+        /// <summary>
+        /// Synchronous operations are disallowed. Call WriteAsync or set AllowSynchronousIO to true instead.
+        /// </summary>
+        internal static string FormatSynchronousWritesDisallowed()
+            => GetString("SynchronousWritesDisallowed");
+
+        /// <summary>
+        /// Value must be a positive number. To disable a minimum data rate, use null where a MinDataRate instance is expected.
+        /// </summary>
+        internal static string PositiveNumberOrNullMinDataRateRequired
+        {
+            get => GetString("PositiveNumberOrNullMinDataRateRequired");
+        }
+
+        /// <summary>
+        /// Value must be a positive number. To disable a minimum data rate, use null where a MinDataRate instance is expected.
+        /// </summary>
+        internal static string FormatPositiveNumberOrNullMinDataRateRequired()
+            => GetString("PositiveNumberOrNullMinDataRateRequired");
 
         private static string GetString(string name, params string[] formatterNames)
         {

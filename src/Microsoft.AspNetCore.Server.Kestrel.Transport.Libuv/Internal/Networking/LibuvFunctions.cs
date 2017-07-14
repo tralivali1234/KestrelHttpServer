@@ -30,6 +30,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Internal.Networkin
             _uv_tcp_nodelay = NativeMethods.uv_tcp_nodelay;
             _uv_pipe_init = NativeMethods.uv_pipe_init;
             _uv_pipe_bind = NativeMethods.uv_pipe_bind;
+            _uv_pipe_open = NativeMethods.uv_pipe_open;
             _uv_listen = NativeMethods.uv_listen;
             _uv_accept = NativeMethods.uv_accept;
             _uv_pipe_connect = NativeMethods.uv_pipe_connect;
@@ -82,7 +83,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Internal.Networkin
             throw GetError(statusCode);
         }
 
-        public void Check(int statusCode, out Exception error)
+        public void Check(int statusCode, out UvException error)
         {
             // Note: method is explicitly small so the success case is easily inlined
             error = statusCode < 0 ? GetError(statusCode) : null;
@@ -229,6 +230,13 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Internal.Networkin
             ThrowIfErrored(_uv_pipe_bind(handle, name));
         }
 
+        protected Func<UvPipeHandle, IntPtr, int> _uv_pipe_open;
+        public void pipe_open(UvPipeHandle handle, IntPtr hSocket)
+        {
+            handle.Validate();
+            ThrowIfErrored(_uv_pipe_open(handle, hSocket));
+        }
+
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         public delegate void uv_connection_cb(IntPtr server, int status);
         protected Func<UvStreamHandle, int, uv_connection_cb, int> _uv_listen;
@@ -345,14 +353,14 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Internal.Networkin
 
         protected delegate int uv_ip4_addr_func(string ip, int port, out SockAddr addr);
         protected uv_ip4_addr_func _uv_ip4_addr;
-        public void ip4_addr(string ip, int port, out SockAddr addr, out Exception error)
+        public void ip4_addr(string ip, int port, out SockAddr addr, out UvException error)
         {
             Check(_uv_ip4_addr(ip, port, out addr), out error);
         }
 
         protected delegate int uv_ip6_addr_func(string ip, int port, out SockAddr addr);
         protected uv_ip6_addr_func _uv_ip6_addr;
-        public void ip6_addr(string ip, int port, out SockAddr addr, out Exception error)
+        public void ip6_addr(string ip, int port, out SockAddr addr, out UvException error)
         {
             Check(_uv_ip6_addr(ip, port, out addr), out error);
         }
@@ -533,6 +541,9 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Libuv.Internal.Networkin
 
             [DllImport("libuv", CallingConvention = CallingConvention.Cdecl)]
             public static extern int uv_pipe_bind(UvPipeHandle loop, string name);
+
+            [DllImport("libuv", CallingConvention = CallingConvention.Cdecl)]
+            public static extern int uv_pipe_open(UvPipeHandle handle, IntPtr hSocket);
 
             [DllImport("libuv", CallingConvention = CallingConvention.Cdecl)]
             public static extern int uv_listen(UvStreamHandle handle, int backlog, uv_connection_cb cb);

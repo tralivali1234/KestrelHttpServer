@@ -22,6 +22,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Performance
         public void ConnectionReadFin(string connectionId) { }
         public void ConnectionReset(string connectionId) { }
         public void ConnectionResume(string connectionId) { }
+        public void ConnectionRejected(string connectionId) { }
         public void ConnectionStart(string connectionId) { }
         public void ConnectionStop(string connectionId) { }
         public void ConnectionWrite(string connectionId, int count) { }
@@ -35,5 +36,9 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Performance
         public void RequestProcessingError(string connectionId, Exception ex) { }
         public void HeartbeatSlow(TimeSpan interval, DateTimeOffset now) { }
         public void ApplicationNeverCompleted(string connectionId) { }
+        public void RequestBodyStart(string connectionId, string traceIdentifier) { }
+        public void RequestBodyDone(string connectionId, string traceIdentifier) { }
+        public void RequestBodyMininumDataRateNotSatisfied(string connectionId, string traceIdentifier, double rate) { }
+        public void ResponseMininumDataRateNotSatisfied(string connectionId, string traceIdentifier) { }
     }
 }

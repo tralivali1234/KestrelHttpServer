@@ -5,32 +5,23 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http;
-using Microsoft.Extensions.Internal;
 
 namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests.TestHelpers
 {
     public class MockFrameControl : IFrameControl
     {
-        public void Flush()
-        {
-        }
-
         public Task FlushAsync(CancellationToken cancellationToken)
         {
-            return TaskCache.CompletedTask;
+            return Task.CompletedTask;
         }
 
         public void ProduceContinue()
         {
         }
 
-        public void Write(ArraySegment<byte> data)
-        {
-        }
-
         public Task WriteAsync(ArraySegment<byte> data, CancellationToken cancellationToken)
         {
-            return TaskCache.CompletedTask;
+            return Task.CompletedTask;
         }
     }
 }
