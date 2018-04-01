@@ -36,7 +36,7 @@ namespace CodeGenerator
                             {{{(header.Identifier == "ContentLength" ? $@"
                                 if (_contentLength.HasValue)
                                 {{
-                                    ThrowMultipleContentLengthsException();
+                                    BadHttpRequestException.Throw(RequestRejectionReason.MultipleContentLengths);
                                 }}
                                 else
                                 {{
@@ -265,14 +265,14 @@ namespace CodeGenerator
                 {
                     Headers = requestHeaders,
                     HeadersByLength = requestHeaders.GroupBy(x => x.Name.Length),
-                    ClassName = "FrameRequestHeaders",
+                    ClassName = "HttpRequestHeaders",
                     Bytes = default(byte[])
                 },
                 new
                 {
                     Headers = responseHeaders,
                     HeadersByLength = responseHeaders.GroupBy(x => x.Name.Length),
-                    ClassName = "FrameResponseHeaders",
+                    ClassName = "HttpResponseHeaders",
                     Bytes = responseHeaders.SelectMany(header => header.Bytes).ToArray()
                 }
             };
@@ -292,7 +292,8 @@ namespace CodeGenerator
 using System;
 using System.Collections.Generic;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure;
-using Microsoft.AspNetCore.Server.Kestrel.Internal.System.IO.Pipelines;
+using System.Buffers;
+using System.IO.Pipelines;
 using Microsoft.Extensions.Primitives;
 using Microsoft.Net.Http.Headers;
 
@@ -343,7 +344,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
             }}")}
         }}")}
 {Each(loop.Headers.Where(header => header.EnhancedSetter), header => $@"
-        public void SetRaw{header.Identifier}(StringValues value, byte[] raw)
+        public void SetRaw{header.Identifier}(in StringValues value, byte[] raw)
         {{
             {header.SetBit()};
             _headers._{header.Identifier} = value;
@@ -382,8 +383,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
             return MaybeUnknown?.TryGetValue(key, out value) ?? false;
         }}
 
-        protected override void SetValueFast(string key, StringValues value)
-        {{{(loop.ClassName == "FrameResponseHeaders" ? @"
+        protected override void SetValueFast(string key, in StringValues value)
+        {{{(loop.ClassName == "HttpResponseHeaders" ? @"
             ValidateHeaderCharacters(value);" : "")}
             switch (key.Length)
             {{{Each(loop.HeadersByLength, byLength => $@"
@@ -404,8 +405,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
             SetValueUnknown(key, value);
         }}
 
-        protected override bool AddValueFast(string key, StringValues value)
-        {{{(loop.ClassName == "FrameResponseHeaders" ? @"
+        protected override bool AddValueFast(string key, in StringValues value)
+        {{{(loop.ClassName == "HttpResponseHeaders" ? @"
             ValidateHeaderCharacters(value);" : "")}
             switch (key.Length)
             {{{Each(loop.HeadersByLength, byLength => $@"
@@ -431,7 +432,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
                     }}
                     break;")}
             }}
-{(loop.ClassName == "FrameResponseHeaders" ? @"
+{(loop.ClassName == "HttpResponseHeaders" ? @"
             ValidateHeaderCharacters(key);" : "")}
             Unknown.Add(key, value);
             // Return true, above will throw and exit for false
@@ -474,7 +475,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
             _contentLength = null;
             var tempBits = _bits;
             _bits = 0;
-            if(FrameHeaders.BitCount(tempBits) > 12)
+            if(HttpHeaders.BitCount(tempBits) > 12)
             {{
                 _headers = default(HeaderReferences);
                 return;
@@ -521,8 +522,8 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
 
             return true;
         }}
-        {(loop.ClassName == "FrameResponseHeaders" ? $@"
-        protected void CopyToFast(ref WritableBufferWriter output)
+        {(loop.ClassName == "HttpResponseHeaders" ? $@"
+        internal void CopyToFast(ref BufferWriter<PipeWriter> output)
         {{
             var tempBits = _bits | (_contentLength.HasValue ? {1L << 63}L : 0);
             {Each(loop.Headers.Where(header => header.Identifier != "ContentLength").OrderBy(h => !h.PrimaryHeader), header => $@"
@@ -540,7 +541,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
                             var value = _headers._{header.Identifier}[i];
                             if (value != null)
                             {{
-                                output.Write(_headerBytes, {header.BytesOffset}, {header.BytesCount});
+                                output.Write(new ReadOnlySpan<byte>(_headerBytes, {header.BytesOffset}, {header.BytesCount}));
                                 PipelineExtensions.WriteAsciiNoValidation(ref output, value);
                             }}
                         }}
@@ -554,7 +555,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
                 }}{(header.Identifier == "Server" ? $@"
                 if ((tempBits & {1L << 63}L) != 0)
                 {{
-                    output.Write(_headerBytes, {loop.Headers.First(x => x.Identifier == "ContentLength").BytesOffset}, {loop.Headers.First(x => x.Identifier == "ContentLength").BytesCount});
+                    output.Write(new ReadOnlySpan<byte>(_headerBytes, {loop.Headers.First(x => x.Identifier == "ContentLength").BytesOffset}, {loop.Headers.First(x => x.Identifier == "ContentLength").BytesCount}));
                     PipelineExtensions.WriteNumeric(ref output, (ulong)ContentLength.Value);
 
                     if((tempBits & ~{1L << 63}L) == 0)
@@ -564,7 +565,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
                     tempBits &= ~{1L << 63}L;
                 }}" : "")}")}
         }}" : "")}
-        {(loop.ClassName == "FrameRequestHeaders" ? $@"
+        {(loop.ClassName == "HttpRequestHeaders" ? $@"
         public unsafe void Append(byte* pKeyBytes, int keyLength, string value)
         {{
             var pUB = pKeyBytes;

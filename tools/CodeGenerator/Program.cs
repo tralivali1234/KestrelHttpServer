@@ -12,12 +12,12 @@ namespace CodeGenerator
         {
             if (args.Length < 1)
             {
-                Console.Error.WriteLine("Missing path to FrameHeaders.Generated.cs");
+                Console.Error.WriteLine("Missing path to HttpHeaders.Generated.cs");
                 return 1;
             }
             else if (args.Length < 2)
             {
-                Console.Error.WriteLine("Missing path to Frame.Generated.cs");
+                Console.Error.WriteLine("Missing path to HttpProtocol.Generated.cs");
                 return 1;
             }
             else if (args.Length < 3)
@@ -31,10 +31,10 @@ namespace CodeGenerator
             return 0;
         }
 
-        public static void Run(string knownHeadersPath, string frameFeaturesCollectionPath, string httpUtilitiesPath)
+        public static void Run(string knownHeadersPath, string httpProtocolFeatureCollectionPath, string httpUtilitiesPath)
         {
             var knownHeadersContent = KnownHeaders.GeneratedFile();
-            var frameFeatureCollectionContent = FrameFeatureCollection.GeneratedFile();
+            var httpProtocolFeatureCollectionContent = HttpProtocolFeatureCollection.GeneratedFile("HttpProtocol");
             var httpUtilitiesContent = HttpUtilities.HttpUtilities.GeneratedFile();
 
             var existingKnownHeaders = File.Exists(knownHeadersPath) ? File.ReadAllText(knownHeadersPath) : "";
@@ -43,10 +43,10 @@ namespace CodeGenerator
                 File.WriteAllText(knownHeadersPath, knownHeadersContent);
             }
 
-            var existingFrameFeatureCollection = File.Exists(frameFeaturesCollectionPath) ? File.ReadAllText(frameFeaturesCollectionPath) : "";
-            if (!string.Equals(frameFeatureCollectionContent, existingFrameFeatureCollection))
+            var existingHttpProtocolFeatureCollection = File.Exists(httpProtocolFeatureCollectionPath) ? File.ReadAllText(httpProtocolFeatureCollectionPath) : "";
+            if (!string.Equals(httpProtocolFeatureCollectionContent, existingHttpProtocolFeatureCollection))
             {
-                File.WriteAllText(frameFeaturesCollectionPath, frameFeatureCollectionContent);
+                File.WriteAllText(httpProtocolFeatureCollectionPath, httpProtocolFeatureCollectionContent);
             }
 
             var existingHttpUtilities = File.Exists(httpUtilitiesPath) ? File.ReadAllText(httpUtilitiesPath) : "";

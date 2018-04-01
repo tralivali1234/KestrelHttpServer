@@ -1,7 +1,7 @@
 // Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
-using System;
+using System.IO.Pipelines;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http;
@@ -35,11 +35,11 @@ namespace Microsoft.AspNetCore.Testing
         {
             LoggerFactory = loggerFactory;
             Log = kestrelTrace;
-            ThreadPool = new LoggingThreadPool(Log);
+            Scheduler = PipeScheduler.ThreadPool;
             SystemClock = new MockSystemClock();
             DateHeaderValueManager = new DateHeaderValueManager(SystemClock);
-            ConnectionManager = new FrameConnectionManager(Log, ResourceCounter.Unlimited, ResourceCounter.Unlimited);
-            HttpParserFactory = frameAdapter => new HttpParser<FrameAdapter>(frameAdapter.Frame.ServiceContext.Log.IsEnabled(LogLevel.Information));
+            ConnectionManager = new HttpConnectionManager(Log, ResourceCounter.Unlimited);
+            HttpParser = new HttpParser<Http1ParsingHandler>(Log.IsEnabled(LogLevel.Information));
             ServerOptions = new KestrelServerOptions
             {
                 AddServerHeader = false
